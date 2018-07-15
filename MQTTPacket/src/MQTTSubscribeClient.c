@@ -106,6 +106,7 @@ int MQTTDeserialize_suback(unsigned short* packetid, int maxcount, int* count, i
 	int mylen;
 
 	FUNC_ENTRY;
+    (void)buflen;
 	header.byte = readChar(&curdata);
 	if (header.bits.type != SUBACK)
 		goto exit;

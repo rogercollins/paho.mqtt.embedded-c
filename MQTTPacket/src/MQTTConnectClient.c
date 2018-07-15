@@ -139,6 +139,7 @@ int MQTTDeserialize_connack(unsigned char* sessionPresent, unsigned char* connac
 	MQTTConnackFlags flags = {0};
 
 	FUNC_ENTRY;
+	(void)buflen;
 	header.byte = readChar(&curdata);
 	if (header.bits.type != CONNACK)
 		goto exit;

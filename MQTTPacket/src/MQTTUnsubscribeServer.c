@@ -41,6 +41,8 @@ int MQTTDeserialize_unsubscribe(unsigned char* dup, unsigned short* packetid, in
 	int mylen = 0;
 
 	FUNC_ENTRY;
+    (void)maxcount;
+    (void)len;
 	header.byte = readChar(&curdata);
 	if (header.bits.type != UNSUBSCRIBE)
 		goto exit;

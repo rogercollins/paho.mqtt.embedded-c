@@ -115,6 +115,14 @@ typedef struct MQTTClient
     int isconnected;
     int cleansession;
 
+    struct AsyncHandler
+    {
+        /** if non-zero, packet type we're waiting for */
+        enum msgTypes packet_type;
+        void (*fp)(struct MQTTClient *);
+        Timer timer;
+    } async_handler;
+
     struct MessageHandlers
     {
         const char* topicFilter;
@@ -129,6 +137,14 @@ typedef struct MQTTClient
     Mutex mutex;
     Thread thread;
 #endif
+
+    /* added for async ops */
+
+    /** amount read into readbuf */
+    int read_len;
+
+    /** message handler index of last start op */
+    int handler_index;
 } MQTTClient;
 
 #define DefaultClient {0, 0, 0, 0, NULL, NULL, 0, 0, 0}
@@ -159,6 +175,10 @@ DLLExport int MQTTConnectWithResults(MQTTClient* client, MQTTPacket_connectData*
  */
 DLLExport int MQTTConnect(MQTTClient* client, MQTTPacket_connectData* options);
 
+int MQTTConnectStart(MQTTClient* client, MQTTPacket_connectData* options);
+
+void MQTTCycle(MQTTClient* c);
+
 /** MQTT Publish - send an MQTT publish packet and wait for all acks to complete for all QoSs
  *  @param client - the client object to use
  *  @param topic - the topic to publish to
@@ -166,6 +186,8 @@ DLLExport int MQTTConnect(MQTTClient* client, MQTTPacket_connectData* options);
  *  @return success code
  */
 DLLExport int MQTTPublish(MQTTClient* client, const char*, MQTTMessage*);
+
+int MQTTPublishStart(MQTTClient* client, const char*, MQTTMessage*);
 
 /** MQTT SetMessageHandler - set or remove a per topic message handler
  *  @param client - the client object to use
@@ -182,6 +204,7 @@ DLLExport int MQTTSetMessageHandler(MQTTClient* c, const char* topicFilter, mess
  *  @return success code
  */
 DLLExport int MQTTSubscribe(MQTTClient* client, const char* topicFilter, enum QoS, messageHandler);
+int MQTTSubscribeStart(MQTTClient* client, const char* topicFilter, enum QoS, messageHandler messageHandler);
 
 /** MQTT Subscribe - send an MQTT subscribe packet and wait for suback before returning.
  *  @param client - the client object to use
