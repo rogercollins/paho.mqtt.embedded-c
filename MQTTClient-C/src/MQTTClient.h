@@ -113,7 +113,10 @@ typedef struct MQTTClient
     unsigned int keepAliveInterval;
     char ping_outstanding;
     int isconnected;
+    int isbroker;
     int cleansession;
+
+    Timer send_timer;
 
     struct AsyncHandler
     {
@@ -240,6 +243,12 @@ DLLExport int MQTTYield(MQTTClient* client, int time);
  *  @return truth value indicating whether the client is connected to the server
  */
 DLLExport int MQTTIsConnected(MQTTClient* client);
+
+/** Can't switch connections while this is true */
+int MQTTIsBusy(MQTTClient* client);
+
+/** Start broker service connection */
+void MQTTServerStart(MQTTClient* c);
 
 #if defined(MQTT_TASK)
 /** MQTT start background thread for a client.  After this, MQTTYield should not be called.

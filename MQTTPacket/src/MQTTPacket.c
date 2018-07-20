@@ -20,6 +20,14 @@
 
 #include <string.h>
 
+
+const char * const MQTTMsgTypeNames[MQTT_NUM_TYPES] = {
+        "<none>", "CONNECT", "CONNACK", "PUBLISH", "PUBACK", "PUBREC", "PUBREL",
+        "PUBCOMP", "SUBSCRIBE", "SUBACK", "UNSUBSCRIBE", "UNSUBACK",
+        "PINGREQ", "PINGRESP", "DISCONNECT"
+};
+
+
 /**
  * Encodes the message length according to the MQTT algorithm
  * @param buf the buffer into which the encoded data is written

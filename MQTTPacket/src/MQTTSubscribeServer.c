@@ -30,7 +30,7 @@
   * @param requestedQoSs - array of requested QoS
   * @param buf the raw buffer data, of the correct length determined by the remaining length field
   * @param buflen the length in bytes of the data in the supplied buffer
-  * @return the length of the serialized data.  <= 0 indicates error
+  * @return 1.  <= 0 indicates error
   */
 int MQTTDeserialize_subscribe(unsigned char* dup, unsigned short* packetid, int maxcount, int* count, MQTTString topicFilters[],
 	int requestedQoSs[], unsigned char* buf, int buflen)
