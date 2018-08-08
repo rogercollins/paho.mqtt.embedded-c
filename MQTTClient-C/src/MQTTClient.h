@@ -148,6 +148,10 @@ typedef struct MQTTClient
 
     /** message handler index of last start op */
     int handler_index;
+
+    /* added for broker ops */
+
+    void (*subscribe)(char *);
 } MQTTClient;
 
 #define DefaultClient {0, 0, 0, 0, NULL, NULL, 0, 0, 0}

@@ -150,7 +150,7 @@ static int readPacket(MQTTClient* c, Timer* timer)
     header.byte = c->readbuf[0];
     rc = header.bits.type;
     if (c->keepAliveInterval > 0)
-        TimerCountdown(&c->last_received, c->keepAliveInterval); // record the fact that we have successfully received a packet
+        TimerCountdown(&c->last_received, c->keepAliveInterval + 10); // record the fact that we have successfully received a packet
 exit:
     return rc;
 }
@@ -313,8 +313,12 @@ static int cycle(MQTTClient* c, Timer* timer)
                     len = MQTTSerialize_ack(c->buf, c->buf_size, SUBACK, 0, msgid);
                     if (len <= 0)
                         rc = FAILURE;
-                    else
+                    else {
                         rc = sendPacket(c, len, timer);
+                        if (c->subscribe) {
+                            (*c->subscribe)(topicFilters[0].cstring);
+                        }
+                    }
                 }
             }
             break;
@@ -576,10 +580,10 @@ int MQTTConnectStart(MQTTClient* c, MQTTPacket_connectData* options)
 
     DEBUG_PRINT("MQTTConnectStart\n");
 #if defined(MQTT_TASK)
-      MutexLock(&c->mutex);
+    MutexLock(&c->mutex);
 #endif
-      if (c->isconnected) /* don't send connect packet again if we are already connected */
-          goto exit;
+    if (c->isconnected) /* don't send connect packet again if we are already connected */
+        goto exit;
 
     TimerInit(&connect_timer);
     TimerCountdownMS(&connect_timer, c->command_timeout_ms);
@@ -617,8 +621,11 @@ void ConnectEnd(MQTTClient *c)
             c->ping_outstanding = 0;
             return;
         }
+        printf("mqtt: error: %d CONNACK\n", data.rc);
     }
-    printf("mqtt: error reading CONNACK\n");
+    else {
+        printf("mqtt: error: reading CONNACK\n");
+    }
     MQTTCloseSession(c);
 }
 
