@@ -143,6 +143,9 @@ typedef struct MQTTClient
 
     /* added for async ops */
 
+    /** app should wait till this is false to publish */
+    int busy;
+
     void *app_link;
 
     void (*authentication_failed)(struct MQTTClient *);

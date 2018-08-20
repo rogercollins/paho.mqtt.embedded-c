@@ -46,6 +46,10 @@ static int sendPacket(MQTTClient* c, int length, Timer* timer)
         sent = 0;
 
     DEBUG_PRINT("sendPacket %s\n", MQTTMsgTypeNames[c->buf[0] >> 4]);
+
+    ASSERT(c->busy == 0);
+    c->busy = 1;
+
     while (sent < length && !TimerIsExpired(timer))
     {
         rc = c->ipstack->mqttwrite(c->ipstack, &c->buf[sent], length, TimerLeftMS(timer));
