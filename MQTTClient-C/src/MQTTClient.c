@@ -316,7 +316,7 @@ static int cycle(MQTTClient* c, Timer* timer)
                     else {
                         rc = sendPacket(c, len, timer);
                         if (c->subscribe) {
-                            (*c->subscribe)(topicFilters[0].cstring);
+                            (*c->subscribe)(&topicFilters[0]);
                         }
                     }
                 }
@@ -491,7 +491,9 @@ void MQTTCycle(MQTTClient* c)
         }
         else if (TimerIsExpired(&c->async_handler.timer))
         {
-            printf("mqtt: timeout waiting for %s\n", MQTTMsgTypeNames[c->async_handler.packet_type]);
+            printf("%d: mqtt: timeout waiting for %s\n",
+                    clock_seconds,
+                    MQTTMsgTypeNames[c->async_handler.packet_type]);
             MQTTCloseSession(c);
         }
     }
@@ -503,6 +505,7 @@ void MQTTCycle(MQTTClient* c)
 
 void async_waitfor(MQTTClient* c, int packet_type, void (*fp)(MQTTClient *), int timeout_ms)
 {
+    DEBUG_PRINT("%d: mqtt: waiting for %s, %d ms\n", clock_seconds, MQTTMsgTypeNames[packet_type], timeout_ms);
     c->async_handler.fp = fp;
     c->async_handler.packet_type = packet_type;
     TimerCountdownMS(&c->async_handler.timer, timeout_ms);
@@ -620,6 +623,10 @@ void ConnectEnd(MQTTClient *c)
             c->isconnected = 1;
             c->ping_outstanding = 0;
             return;
+        }
+        else if (data.rc == 5 && c->authentication_failed)
+        {
+            c->authentication_failed(c);
         }
         printf("mqtt: error: %d CONNACK\n", data.rc);
     }

@@ -143,6 +143,10 @@ typedef struct MQTTClient
 
     /* added for async ops */
 
+    void *app_link;
+
+    void (*authentication_failed)(struct MQTTClient *);
+
     /** amount read into readbuf */
     int read_len;
 
@@ -151,7 +155,7 @@ typedef struct MQTTClient
 
     /* added for broker ops */
 
-    void (*subscribe)(char *);
+    void (*subscribe)(MQTTString *);
 } MQTTClient;
 
 #define DefaultClient {0, 0, 0, 0, NULL, NULL, 0, 0, 0}
