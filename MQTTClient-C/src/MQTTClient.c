@@ -88,6 +88,9 @@ void MQTTClientInit(MQTTClient* c, Network* network, unsigned int command_timeou
 	  c->next_packetid = 1;
     TimerInit(&c->last_sent);
     TimerInit(&c->last_received);
+
+    c->busy = 0;
+
 #if defined(MQTT_TASK)
 	  MutexInit(&c->mutex);
 #endif
@@ -166,8 +169,8 @@ exit:
 static char isTopicMatched(char* topicFilter, MQTTString* topicName)
 {
     char* curf = topicFilter;
-    char* curn = topicName->lenstring.data;
-    char* curn_end = curn + topicName->lenstring.len;
+    char* curn = topicName->cstring ? topicName->cstring : topicName->lenstring.data;
+    char* curn_end = curn + (topicName->cstring ? strlen(topicName->cstring) : (uint32_t)topicName->lenstring.len);
 
     while (*curf && curn < curn_end)
     {
@@ -185,11 +188,37 @@ static char isTopicMatched(char* topicFilter, MQTTString* topicName)
             curn = curn_end - 1;    // skip until end of string
         curf++;
         curn++;
-    };
+    }
 
     return (curn == curn_end) && (*curf == '\0');
 }
 
+static void clientHandler(MessageData* data)
+{
+    (void)data;
+    /* do nothing */
+}
+
+int MQTTClientIsSubscribed(MQTTClient* c, MQTTString* topicName)
+{
+    int i;
+    // we have to find the right message handler - indexed by topic
+    for (i = 0; i < MAX_MESSAGE_HANDLERS; ++i)
+    {
+        if (c->messageHandlers[i].topicFilter != 0 &&
+                (MQTTPacket_equals(topicName, (char*)c->messageHandlers[i].topicFilter) ||
+                        isTopicMatched((char*)c->messageHandlers[i].topicFilter, topicName)))
+        {
+            if (c->messageHandlers[i].fp == clientHandler)
+            {
+                DEBUG_PRINT("MQTTClientIsSubscribed(%p, %s) = 1\n");
+                return 1;
+            }
+        }
+    }
+    DEBUG_PRINT("MQTTClientIsSubscribed(%p, %s) = 0\n");
+    return 0;
+}
 
 static int deliverMessage(MQTTClient* c, MQTTString* topicName, MQTTMessage* message)
 {
@@ -274,7 +303,6 @@ void MQTTCloseSession(MQTTClient* c)
     c->ipstack->disconnect(c->ipstack);
 }
 
-
 static int cycle(MQTTClient* c, Timer* timer)
 {
     int len = 0,
@@ -318,9 +346,13 @@ static int cycle(MQTTClient* c, Timer* timer)
                     if (len <= 0)
                         rc = FAILURE;
                     else {
-                        rc = sendPacket(c, len, timer);
-                        if (c->subscribe) {
-                            (*c->subscribe)(&topicFilters[0]);
+                        /* simple broker treats any subscribe as a subscribe to '#' */
+                        rc = MQTTSetMessageHandler(c, "#", clientHandler);
+                        if (rc == SUCCESS) {
+                            rc = sendPacket(c, len, timer);
+                            if (c->subscribe) {
+                                (*c->subscribe)(&topicFilters[0]);
+                            }
                         }
                     }
                 }
@@ -644,6 +676,8 @@ int MQTTSetMessageHandler(MQTTClient* c, const char* topicFilter, messageHandler
 {
     int rc = FAILURE;
     int i = -1;
+
+    DEBUG_PRINT("MQTTSetMessageHandler(%p, %s)\n", c, topicFilter);
 
     c->handler_index = -1;
 
