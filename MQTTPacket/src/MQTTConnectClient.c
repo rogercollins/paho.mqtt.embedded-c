@@ -213,3 +213,14 @@ int MQTTSerialize_pingreq(unsigned char* buf, int buflen)
 {
 	return MQTTSerialize_zero(buf, buflen, PINGREQ);
 }
+
+/**
+  * Serializes a disconnect packet into the supplied buffer, ready for writing to a socket
+  * @param buf the buffer into which the packet will be serialized
+  * @param buflen the length in bytes of the supplied buffer, to avoid overruns
+  * @return serialized length, or error if 0
+  */
+int MQTTSerialize_pingresp(unsigned char* buf, int buflen)
+{
+    return MQTTSerialize_zero(buf, buflen, PINGRESP);
+}

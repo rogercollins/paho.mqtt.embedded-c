@@ -266,8 +266,10 @@ int keepalive(MQTTClient* c)
 
     if (TimerIsExpired(&c->last_sent) || TimerIsExpired(&c->last_received))
     {
-        if (c->ping_outstanding)
+        if (c->ping_outstanding) {
+            printf("mqtt: ping response timeout\n");
             rc = FAILURE; /* PINGRESP not received in keepalive interval */
+        }
         else
         {
             Timer timer;
@@ -417,6 +419,13 @@ static int cycle(MQTTClient* c, Timer* timer)
         case PINGRESP:
             c->ping_outstanding = 0;
             break;
+        case PINGREQ:
+        {
+            int len = MQTTSerialize_pingresp(c->buf, c->buf_size);
+            if (len > 0) {
+                rc = sendPacket(c, len, timer);
+            }
+        }
     }
 
     if (keepalive(c) != SUCCESS) {
