@@ -24,6 +24,7 @@
 #include <debug.h>
 
 
+
 static void ConnectEnd(MQTTClient *c);
 static void SubscribeEnd(MQTTClient* c);
 static void PublishEnd(MQTTClient* c);
@@ -669,7 +670,7 @@ void ConnectEnd(MQTTClient *c)
             c->ping_outstanding = 0;
             return;
         }
-        else if (data.rc == 5 && c->authentication_failed)
+        else if ((data.rc == 5 || data.rc == 4) && c->authentication_failed)
         {
             c->authentication_failed(c);
         }
