@@ -194,7 +194,7 @@ static char isTopicMatched(char* topicFilter, MQTTString* topicName)
     return (curn == curn_end) && (*curf == '\0');
 }
 
-static void clientHandler(MessageData* data)
+static void clientHandler(MQTTClient *c, MessageData* data)
 {
     (void)data;
     /* do nothing */
@@ -212,12 +212,12 @@ int MQTTClientIsSubscribed(MQTTClient* c, MQTTString* topicName)
         {
             if (c->messageHandlers[i].fp == clientHandler)
             {
-                DEBUG_PRINT("MQTTClientIsSubscribed(%p, %s) = 1\n");
+                DEBUG_PRINT("MQTTClientIsSubscribed(%p, %s) = 1\n", c, topicName->cstring);
                 return 1;
             }
         }
     }
-    DEBUG_PRINT("MQTTClientIsSubscribed(%p, %s) = 0\n");
+    DEBUG_PRINT("MQTTClientIsSubscribed(%p, %s) = 0\n", c, topicName->cstring);
     return 0;
 }
 
@@ -236,7 +236,7 @@ static int deliverMessage(MQTTClient* c, MQTTString* topicName, MQTTMessage* mes
             {
                 MessageData md;
                 NewMessageData(&md, topicName, message);
-                c->messageHandlers[i].fp(&md);
+                c->messageHandlers[i].fp(c, &md);
                 rc = SUCCESS;
             }
         }
@@ -301,6 +301,7 @@ void MQTTCloseSession(MQTTClient* c)
     c->async_handler.packet_type = 0;
     c->ping_outstanding = 0;
     c->isconnected = 0;
+    c->busy = 0;
     if (c->cleansession)
         MQTTCleanSession(c);
     c->ipstack->disconnect(c->ipstack);
@@ -314,7 +315,7 @@ static int cycle(MQTTClient* c, Timer* timer)
     int packet_type = readPacket(c, timer);     /* read the socket, see what work is due */
 
     if (packet_type > 0) {
-        DEBUG_PRINT("%s\n", MQTTMsgTypeNames[packet_type]);
+        DEBUG_PRINT("mqtt: cycle: recv: %p: %s, len %d\n", c, MQTTMsgTypeNames[packet_type], c->read_len);
     }
 
     switch (packet_type)
@@ -537,9 +538,8 @@ void MQTTCycle(MQTTClient* c)
         }
         else if (TimerIsExpired(&c->async_handler.timer))
         {
-            printf("%d: mqtt: timeout waiting for %s\n",
-                    clock_seconds,
-                    MQTTMsgTypeNames[c->async_handler.packet_type]);
+            printf("mqtt: MQTTCycle: %p: timeout waiting for %s\n",
+                    c, MQTTMsgTypeNames[c->async_handler.packet_type]);
             MQTTCloseSession(c);
         }
     }
@@ -551,7 +551,8 @@ void MQTTCycle(MQTTClient* c)
 
 void async_waitfor(MQTTClient* c, int packet_type, void (*fp)(MQTTClient *), int timeout_ms)
 {
-    DEBUG_PRINT("%d: mqtt: waiting for %s, %d ms\n", clock_seconds, MQTTMsgTypeNames[packet_type], timeout_ms);
+    DEBUG_PRINT("mqtt: async_waitfor: %p: %s, %d ms\n", c, MQTTMsgTypeNames[packet_type], timeout_ms);
+    ASSERT(timeout_ms != 0);
     c->async_handler.fp = fp;
     c->async_handler.packet_type = packet_type;
     TimerCountdownMS(&c->async_handler.timer, timeout_ms);
@@ -668,6 +669,7 @@ void ConnectEnd(MQTTClient *c)
         {
             c->isconnected = 1;
             c->ping_outstanding = 0;
+            printf("mqtt: connected OK\n");
             return;
         }
         else if ((data.rc == 5 || data.rc == 4) && c->authentication_failed)
