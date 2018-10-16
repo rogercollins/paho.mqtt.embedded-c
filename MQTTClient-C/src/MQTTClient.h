@@ -34,6 +34,7 @@
   #define DLLExport
 #endif
 
+#include <wifi.h>
 #include "MQTTPacket.h"
 
 #if defined(MQTTCLIENT_PLATFORM_HEADER)
@@ -102,6 +103,8 @@ typedef struct MQTTSubackData
 
 struct MQTTClient;
 
+struct Network;
+
 typedef void (*messageHandler)(struct MQTTClient *, MessageData*);
 
 typedef struct MQTTClient
@@ -134,9 +137,10 @@ typedef struct MQTTClient
         void (*fp) (struct MQTTClient *,MessageData*);
     } messageHandlers[MAX_MESSAGE_HANDLERS];      /* Message handlers are indexed by subscription topic */
 
-    void (*defaultMessageHandler) (MessageData*);
+    void (*defaultMessageHandler) (struct MQTTClient *, MessageData*);
 
-    Network* ipstack;
+    struct Network* ipstack;
+    wifi_cx_t *pcx;
     Timer last_sent, last_received;
 #if defined(MQTT_TASK)
     Mutex mutex;
@@ -161,6 +165,7 @@ typedef struct MQTTClient
     /* added for broker ops */
 
     void (*subscribe)(MQTTString *);
+    int (*auth)(MQTTString *username, MQTTString *password);
 } MQTTClient;
 
 #define DefaultClient {0, 0, 0, 0, NULL, NULL, 0, 0, 0}
@@ -173,8 +178,8 @@ typedef struct MQTTClient
  * @param command_timeout_ms
  * @param
  */
-DLLExport void MQTTClientInit(MQTTClient* client, Network* network, unsigned int command_timeout_ms,
-		unsigned char* sendbuf, size_t sendbuf_size, unsigned char* readbuf, size_t readbuf_size);
+DLLExport void MQTTClientInit(MQTTClient* client, struct Network * network, unsigned int command_timeout_ms,
+		unsigned char* sendbuf, size_t sendbuf_size);
 
 int MQTTClientIsSubscribed(MQTTClient* c, MQTTString* topicName);
 

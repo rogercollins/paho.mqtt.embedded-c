@@ -63,6 +63,7 @@ int MQTTSerialize_publish(unsigned char* buf, int buflen, unsigned char dup, int
 	FUNC_ENTRY;
 	if (MQTTPacket_len(rem_len = MQTTSerialize_publishLength(qos, topicName, payloadlen)) > buflen)
 	{
+	    printf("MQTTSerialize_publish: buffer overflow: %d > %d\n", rem_len, buflen);
 		rc = MQTTPACKET_BUFFER_TOO_SHORT;
 		goto exit;
 	}

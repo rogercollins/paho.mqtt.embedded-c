@@ -53,7 +53,7 @@ static int sendPacket(MQTTClient* c, int length, Timer* timer)
 
     while (sent < length && !TimerIsExpired(timer))
     {
-        rc = c->ipstack->mqttwrite(c->ipstack, &c->buf[sent], length, TimerLeftMS(timer));
+        rc = c->ipstack->mqttwrite(c, &c->buf[sent], length, TimerLeftMS(timer));
         if (rc < 0)  // there was an error writing the data
             break;
         sent += rc;
@@ -70,7 +70,7 @@ static int sendPacket(MQTTClient* c, int length, Timer* timer)
 
 
 void MQTTClientInit(MQTTClient* c, Network* network, unsigned int command_timeout_ms,
-		unsigned char* sendbuf, size_t sendbuf_size, unsigned char* readbuf, size_t readbuf_size)
+		unsigned char* sendbuf, size_t sendbuf_size)
 {
     int i;
     c->ipstack = network;
@@ -80,8 +80,6 @@ void MQTTClientInit(MQTTClient* c, Network* network, unsigned int command_timeou
     c->command_timeout_ms = command_timeout_ms;
     c->buf = sendbuf;
     c->buf_size = sendbuf_size;
-    c->readbuf = readbuf;
-    c->readbuf_size = readbuf_size;
     c->isconnected = 0;
     c->cleansession = 0;
     c->ping_outstanding = 0;
@@ -115,7 +113,7 @@ static int decodePacket(MQTTClient* c, int* value, int timeout)
             rc = MQTTPACKET_READ_ERROR; /* bad data */
             goto exit;
         }
-        rc = c->ipstack->mqttread(c->ipstack, &c->readbuf[len], 1, timeout);
+        rc = c->ipstack->mqttread(c, &c->readbuf[len], 1, timeout);
         if (rc != 1)
             goto exit;
         i = c->readbuf[len];
@@ -134,7 +132,7 @@ static int readPacket(MQTTClient* c, Timer* timer)
     size_t rem_len = 0;
 
     /* 1. read the header byte.  This has the packet type in it */
-    int rc = c->ipstack->mqttread(c->ipstack, c->readbuf, 1, TimerLeftMS(timer));
+    int rc = c->ipstack->mqttread(c, c->readbuf, 1, TimerLeftMS(timer));
     if (rc != 1)
         goto exit;
 
@@ -144,12 +142,13 @@ static int readPacket(MQTTClient* c, Timer* timer)
 
     if (rem_len > (c->readbuf_size - len))
     {
+        printf("mqtt: readPacket: BUFFER_OVERFLOW\n");
         rc = BUFFER_OVERFLOW;
         goto exit;
     }
 
     /* 3. read the rest of the buffer using a callback to supply the rest of the data */
-    if (rem_len > 0 && (rc = c->ipstack->mqttread(c->ipstack, c->readbuf + len, rem_len, TimerLeftMS(timer)) != rem_len)) {
+    if (rem_len > 0 && (rc = c->ipstack->mqttread(c, c->readbuf + len, rem_len, TimerLeftMS(timer)) != rem_len)) {
         rc = 0;
         goto exit;
     }
@@ -196,6 +195,7 @@ static char isTopicMatched(char* topicFilter, MQTTString* topicName)
 
 static void clientHandler(MQTTClient *c, MessageData* data)
 {
+    (void)c;
     (void)data;
     /* do nothing */
 }
@@ -246,11 +246,11 @@ static int deliverMessage(MQTTClient* c, MQTTString* topicName, MQTTMessage* mes
     {
         MessageData md;
         NewMessageData(&md, topicName, message);
-        c->defaultMessageHandler(&md);
+        c->defaultMessageHandler(c, &md);
         rc = SUCCESS;
     }
     if (c->read_len > 0) {
-        c->ipstack->mqttfree(c->ipstack, c->read_len);
+        c->ipstack->mqttfree(c, c->read_len);
         c->read_len = 0;
     }
 
@@ -304,7 +304,7 @@ void MQTTCloseSession(MQTTClient* c)
     c->busy = 0;
     if (c->cleansession)
         MQTTCleanSession(c);
-    c->ipstack->disconnect(c->ipstack);
+    c->ipstack->disconnect(c);
 }
 
 static int cycle(MQTTClient* c, Timer* timer)
@@ -375,15 +375,7 @@ static int cycle(MQTTClient* c, Timer* timer)
                 goto exit;
             msg.qos = (enum QoS)intQoS;
             deliverMessage(c, &topicName, &msg);
-            if (c->isbroker)
-            {
-                len = MQTTSerialize_ack(c->buf, c->buf_size, PUBACK, 0, msg.id);
-                if (len <= 0)
-                    rc = FAILURE;
-                else
-                    rc = sendPacket(c, len, timer);
-            }
-            else if (msg.qos != QOS0)
+            if (msg.qos != QOS0)
             {
                 if (msg.qos == QOS1)
                     len = MQTTSerialize_ack(c->buf, c->buf_size, PUBACK, 0, msg.id);
@@ -422,12 +414,16 @@ static int cycle(MQTTClient* c, Timer* timer)
             c->ping_outstanding = 0;
             break;
         case PINGREQ:
-        {
-            int len = MQTTSerialize_pingresp(c->buf, c->buf_size);
-            if (len > 0) {
-                rc = sendPacket(c, len, timer);
+            {
+                int len = MQTTSerialize_pingresp(c->buf, c->buf_size);
+                if (len > 0) {
+                    rc = sendPacket(c, len, timer);
+                }
             }
-        }
+            break;
+        case DISCONNECT:
+            MQTTCloseSession(c);
+            return 0;
     }
 
     if (keepalive(c) != SUCCESS) {
@@ -544,7 +540,7 @@ void MQTTCycle(MQTTClient* c)
         }
     }
     if (c->read_len > 0) {
-        c->ipstack->mqttfree(c->ipstack, c->read_len);
+        c->ipstack->mqttfree(c, c->read_len);
         c->read_len = 0;
     }
 }
@@ -1021,7 +1017,13 @@ int MQTTDisconnect(MQTTClient* c)
 
 void MQTTServerStart(MQTTClient* c)
 {
+    int i;
     DEBUG_PRINT("MQTTServerStart\n");
+
+    for (i = 0; i < MAX_MESSAGE_HANDLERS; ++i) {
+        c->messageHandlers[i].topicFilter = NULL;
+    }
+
     async_waitfor(c, CONNECT, ClientConnect, c->command_timeout_ms);
 }
 
@@ -1033,17 +1035,29 @@ static void ClientConnect(MQTTClient* c)
     if (MQTTDeserialize_connect(&data, c->readbuf, c->readbuf_size) == 1)
     {
         Timer timer;
+        uint8_t rc;
+
+        rc = 0;
+
+        if (c->auth && !(*c->auth)(&data.username, &data.password)) {
+            rc = 5;
+        }
+
         TimerInit(&timer);
         TimerCountdownMS(&timer, c->command_timeout_ms);
-        if ((len = MQTTSerialize_connack(c->buf, c->buf_size, 0, 0)) <= 0)
+        if ((len = MQTTSerialize_connack(c->buf, c->buf_size, rc, 0)) <= 0)
             goto exit;
         if (sendPacket(c, len, &timer) != SUCCESS)
             goto exit;
-        c->isconnected = 1;
-        c->isbroker = 1;
-        c->ping_outstanding = 0;
+        if (rc == 0) {
+            c->isconnected = 1;
+            c->isbroker = 1;
+            c->ping_outstanding = 0;
+            return;
+        }
     }
 exit:
+    MQTTCloseSession(c);
     return;
 }
 
