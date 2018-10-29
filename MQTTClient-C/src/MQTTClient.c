@@ -140,13 +140,6 @@ static int readPacket(MQTTClient* c, Timer* timer)
     /* 2. read the remaining length.  This is variable in itself */
     len += decodePacket(c, (int *)&rem_len, TimerLeftMS(timer));
 
-    if (rem_len > (c->readbuf_size - len))
-    {
-        printf("mqtt: readPacket: BUFFER_OVERFLOW\n");
-        rc = BUFFER_OVERFLOW;
-        goto exit;
-    }
-
     /* 3. read the rest of the buffer using a callback to supply the rest of the data */
     if (rem_len > 0 && (rc = c->ipstack->mqttread(c, c->readbuf + len, rem_len, TimerLeftMS(timer)) != rem_len)) {
         rc = 0;
@@ -242,7 +235,7 @@ static int deliverMessage(MQTTClient* c, MQTTString* topicName, MQTTMessage* mes
         }
     }
 
-    if (rc == FAILURE && c->defaultMessageHandler != NULL)
+    if ((rc == FAILURE || c->isbroker) && c->defaultMessageHandler != NULL)
     {
         MessageData md;
         NewMessageData(&md, topicName, message);
