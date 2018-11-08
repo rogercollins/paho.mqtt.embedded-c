@@ -92,14 +92,20 @@ int MQTTDeserialize_connect(MQTTPacket_connectData* data, unsigned char* buf, in
 		}
 		if (flags.bits.username)
 		{
-			if (enddata - curdata < 3 || !readMQTTLenString(&data->username, &curdata, enddata))
+			if (enddata - curdata < 3 || !readMQTTLenString(&data->username, &curdata, enddata)) {
+                printf("mqtt: connect: username flag set, but no username\n");
 				goto exit; /* username flag set, but no username supplied - invalid */
+			}
 			if (flags.bits.password &&
-				(enddata - curdata < 3 || !readMQTTLenString(&data->password, &curdata, enddata)))
+				(enddata - curdata < 3 || !readMQTTLenString(&data->password, &curdata, enddata))) {
+	            printf("mqtt: connect: password flag set without password\n");
 				goto exit; /* password flag set, but no password supplied - invalid */
+			}
 		}
-		else if (flags.bits.password)
+		else if (flags.bits.password) {
+		    printf("mqtt: connect: password flag set without username\n");
 			goto exit; /* password flag set without username - invalid */
+		}
 		rc = 1;
 	}
 exit:

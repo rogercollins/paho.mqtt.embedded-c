@@ -348,7 +348,7 @@ static int cycle(MQTTClient* c, Timer* timer)
                         if (rc == SUCCESS) {
                             rc = sendPacket(c, len, timer);
                             if (c->subscribe) {
-                                (*c->subscribe)(&topicFilters[0]);
+                                (*c->subscribe)(c, &topicFilters[0]);
                             }
                         }
                     }
@@ -1022,32 +1022,40 @@ void MQTTServerStart(MQTTClient* c)
 
 static void ClientConnect(MQTTClient* c)
 {
+    int rc;
     MQTTPacket_connectData data;
     int len = 0;
+    Timer timer;
+
     DEBUG_PRINT("ClientConnect\n");
-    if (MQTTDeserialize_connect(&data, c->readbuf, c->readbuf_size) == 1)
-    {
-        Timer timer;
-        uint8_t rc;
+    rc = MQTTDeserialize_connect(&data, c->readbuf, c->readbuf_size);
+    if (rc != 1) {
+        printf("mqtt: deserialize_connect error %d\n", rc);
+        goto exit;
+    }
 
-        rc = 0;
+    rc = 0;
 
-        if (c->auth && !(*c->auth)(&data.username, &data.password)) {
-            rc = 5;
-        }
+    if (c->auth && !(*c->auth)(c, &data.username, &data.password)) {
+        rc = 5;
+        printf("mqtt: auth failed: %d\n", rc);
+    }
 
-        TimerInit(&timer);
-        TimerCountdownMS(&timer, c->command_timeout_ms);
-        if ((len = MQTTSerialize_connack(c->buf, c->buf_size, rc, 0)) <= 0)
-            goto exit;
-        if (sendPacket(c, len, &timer) != SUCCESS)
-            goto exit;
-        if (rc == 0) {
-            c->isconnected = 1;
-            c->isbroker = 1;
-            c->ping_outstanding = 0;
-            return;
-        }
+    TimerInit(&timer);
+    TimerCountdownMS(&timer, c->command_timeout_ms);
+    if ((len = MQTTSerialize_connack(c->buf, c->buf_size, rc, 0)) <= 0) {
+        printf("mqtt: serialize_connack error %d\n", len);
+        goto exit;
+    }
+    if ((rc = sendPacket(c, len, &timer)) != SUCCESS) {
+        printf("mqtt: send connack error %d\n", rc);
+        goto exit;
+    }
+    if (rc == 0) {
+        c->isconnected = 1;
+        c->isbroker = 1;
+        c->ping_outstanding = 0;
+        return;
     }
 exit:
     MQTTCloseSession(c);

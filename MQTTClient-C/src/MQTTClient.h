@@ -118,7 +118,6 @@ typedef struct MQTTClient
     unsigned int keepAliveInterval;
     char ping_outstanding;
     int isconnected;
-    int isbroker;
     int cleansession;
 
     Timer send_timer;
@@ -164,8 +163,10 @@ typedef struct MQTTClient
 
     /* added for broker ops */
 
-    void (*subscribe)(MQTTString *);
-    int (*auth)(MQTTString *username, MQTTString *password);
+    int isbroker;
+    int islimited;
+    void (*subscribe)(struct MQTTClient *, MQTTString *);
+    int (*auth)(struct MQTTClient *c, MQTTString *username, MQTTString *password);
 } MQTTClient;
 
 #define DefaultClient {0, 0, 0, 0, NULL, NULL, 0, 0, 0}
