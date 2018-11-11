@@ -751,7 +751,7 @@ int MQTTSubscribeWithResults(MQTTClient* c, const char* topicFilter, enum QoS qo
         data->grantedQoS = QOS0;
         if (MQTTDeserialize_suback(&mypacketid, 1, &count, (int*)&data->grantedQoS, c->readbuf, c->readbuf_size) == 1)
         {
-            if (data->grantedQoS != 0x80)
+            if (data->grantedQoS != SUBFAIL)
                 rc = MQTTSetMessageHandler(c, topicFilter, messageHandler);
         }
     }
@@ -798,9 +798,11 @@ int MQTTSubscribeStart(MQTTClient* c, const char* topicFilter, enum QoS qos, mes
         goto exit;
     if ((rc = sendPacket(c, len, &timer)) != SUCCESS) // send the subscribe packet
         goto exit;             // there was a problem
-    rc = MQTTSetMessageHandler(c, topicFilter, messageHandler);
-    if (rc != SUCCESS)
-        goto exit;
+    if (messageHandler) {
+        rc = MQTTSetMessageHandler(c, topicFilter, messageHandler);
+        if (rc != SUCCESS)
+            goto exit;
+    }
     DEBUG_PRINT("MQTTSubscribeStart: %s\n", topicFilter);
     async_waitfor(c, SUBACK, SubscribeEnd, c->command_timeout_ms);
 
@@ -821,7 +823,7 @@ static void SubscribeEnd(MQTTClient* c)
     data.grantedQoS = QOS0;
     if (MQTTDeserialize_suback(&mypacketid, 1, &count, (int*)&data.grantedQoS, c->readbuf, c->readbuf_size) == 1)
     {
-        if (data.grantedQoS == 0x80 && c->handler_index != -1)
+        if (data.grantedQoS == SUBFAIL && c->handler_index != -1)
         {
             DEBUG_PRINT("removing handler %s\n", c->messageHandlers[c->handler_index].topicFilter);
             c->messageHandlers[c->handler_index].topicFilter = NULL;
@@ -960,7 +962,7 @@ int MQTTPublishStart(MQTTClient* c, const char* topicName, MQTTMessage* message)
               topic, (unsigned char*)message->payload, message->payloadlen);
     if (len <= 0)
         goto exit;
-    DEBUG_PRINT("PUBLISH id %d\n", message->id);
+    DEBUG_PRINT("PUBLISH id %d, %s, %d\n", message->id, topic.cstring, message->payloadlen);
     if ((rc = sendPacket(c, len, &timer)) != SUCCESS) // send the subscribe packet
         goto exit; // there was a problem
     async_waitfor(c, PUBACK, PublishEnd, c->command_timeout_ms);
