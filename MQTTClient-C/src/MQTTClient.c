@@ -24,7 +24,6 @@
 #include <debug.h>
 
 
-
 static void ConnectEnd(MQTTClient *c);
 static void SubscribeEnd(MQTTClient* c);
 static void PublishEnd(MQTTClient* c);
@@ -150,7 +149,7 @@ static int readPacket(MQTTClient* c, Timer* timer)
     header.byte = c->readbuf[0];
     rc = header.bits.type;
     if (c->keepAliveInterval > 0)
-        TimerCountdown(&c->last_received, c->keepAliveInterval + 10); // record the fact that we have successfully received a packet
+        TimerCountdown(&c->last_received, c->keepAliveInterval); // record the fact that we have successfully received a packet
 exit:
     return rc;
 }
@@ -261,7 +260,7 @@ int keepalive(MQTTClient* c)
     if (TimerIsExpired(&c->last_sent) || TimerIsExpired(&c->last_received))
     {
         if (c->ping_outstanding) {
-            printf("mqtt: ping response timeout\n");
+            printf("mqtt: ping response timeout %d\n", clock_ticks);
             rc = FAILURE; /* PINGRESP not received in keepalive interval */
         }
         else
@@ -272,6 +271,8 @@ int keepalive(MQTTClient* c)
             int len = MQTTSerialize_pingreq(c->buf, c->buf_size);
             if (len > 0 && (rc = sendPacket(c, len, &timer)) == SUCCESS) // send the ping packet
                 c->ping_outstanding = 1;
+            DEBUG_PRINT("mqtt: ping %d\n", clock_ticks);
+            TimerCountdown(&c->last_received, 10000);
         }
     }
 
@@ -404,6 +405,7 @@ static int cycle(MQTTClient* c, Timer* timer)
         case PUBCOMP:
             break;
         case PINGRESP:
+            DEBUG_PRINT("pingresp %d\n", clock_ticks);
             c->ping_outstanding = 0;
             break;
         case PINGREQ:
@@ -955,17 +957,20 @@ int MQTTPublishStart(MQTTClient* c, const char* topicName, MQTTMessage* message)
     TimerInit(&timer);
     TimerCountdownMS(&timer, c->command_timeout_ms);
 
-    if (message->qos == QOS1 || message->qos == QOS2)
+    if (message->qos)
         message->id = getNextPacketId(c);
 
     len = MQTTSerialize_publish(c->buf, c->buf_size, 0, message->qos, message->retained, message->id,
               topic, (unsigned char*)message->payload, message->payloadlen);
     if (len <= 0)
         goto exit;
-    DEBUG_PRINT("PUBLISH id %d, %s, %d\n", message->id, topic.cstring, message->payloadlen);
+    DEBUG_PRINT("PUBLISH id %d, %s, %d, qos %d\n",
+            message->id, topic.cstring, message->payloadlen, message->qos);
     if ((rc = sendPacket(c, len, &timer)) != SUCCESS) // send the subscribe packet
         goto exit; // there was a problem
-    async_waitfor(c, PUBACK, PublishEnd, c->command_timeout_ms);
+    if (message->qos) {
+        async_waitfor(c, PUBACK, PublishEnd, c->command_timeout_ms);
+    }
 
 exit:
     if (rc == FAILURE)
