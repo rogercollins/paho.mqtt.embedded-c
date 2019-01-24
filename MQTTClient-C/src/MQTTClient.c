@@ -148,8 +148,14 @@ static int readPacket(MQTTClient* c, Timer* timer)
     c->read_len = len + rem_len;
     header.byte = c->readbuf[0];
     rc = header.bits.type;
-    if (c->keepAliveInterval > 0)
-        TimerCountdown(&c->last_received, c->keepAliveInterval); // record the fact that we have successfully received a packet
+    if (c->keepAliveInterval) {
+        if (c->isbroker) {
+            TimerCountdown(&c->last_received, c->keepAliveInterval + c->command_timeout_ms/1000 + 1);
+        }
+        else {
+            TimerCountdown(&c->last_received, c->keepAliveInterval); // record the fact that we have successfully received a packet
+        }
+    }
 exit:
     return rc;
 }
@@ -257,6 +263,14 @@ int keepalive(MQTTClient* c)
     if (c->keepAliveInterval == 0)
         goto exit;
 
+    if (c->isbroker) {
+        if (TimerIsExpired(&c->last_received)) {
+            printf("mqtt: broker keep alive timeout at %d\n", clock_ticks);
+            rc = FAILURE;
+        }
+        return rc;
+    }
+
     if (TimerIsExpired(&c->last_sent) || TimerIsExpired(&c->last_received))
     {
         if (c->ping_outstanding) {
@@ -272,7 +286,7 @@ int keepalive(MQTTClient* c)
             if (len > 0 && (rc = sendPacket(c, len, &timer)) == SUCCESS) // send the ping packet
                 c->ping_outstanding = 1;
             DEBUG_PRINT("mqtt: ping %d\n", clock_ticks);
-            TimerCountdown(&c->last_received, 10000);
+            TimerCountdown(&c->last_received, c->command_timeout_ms);
         }
     }
 
@@ -1066,6 +1080,7 @@ static void ClientConnect(MQTTClient* c)
         c->isbroker = 1;
         c->ping_outstanding = 0;
         c->keepAliveInterval = data.keepAliveInterval;
+        TimerCountdown(&c->last_received, c->keepAliveInterval + c->command_timeout_ms/1000 + 1);
         return;
     }
 exit:
