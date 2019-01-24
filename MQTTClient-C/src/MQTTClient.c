@@ -309,7 +309,8 @@ static int cycle(MQTTClient* c, Timer* timer)
     int packet_type = readPacket(c, timer);     /* read the socket, see what work is due */
 
     if (packet_type > 0) {
-        DEBUG_PRINT("mqtt: cycle: recv: %p: %s, len %d\n", c, MQTTMsgTypeNames[packet_type], c->read_len);
+        DEBUG_PRINT("mqtt: cycle: recv: %p: %s, len %d of %d\n",
+                c, MQTTMsgTypeNames[packet_type], c->read_len, c->readbuf_size);
     }
 
     switch (packet_type)
@@ -521,6 +522,7 @@ void MQTTCycle(MQTTClient* c)
     {
         if (rc == c->async_handler.packet_type)
         {
+            DEBUG_PRINT("mqtt: got: %p: %s\n", c, MQTTMsgTypeNames[rc]);
             if (c->async_handler.fp)
             {
                 (*c->async_handler.fp)(c);
@@ -544,6 +546,7 @@ void async_waitfor(MQTTClient* c, int packet_type, void (*fp)(MQTTClient *), int
 {
     DEBUG_PRINT("mqtt: async_waitfor: %p: %s, %d ms\n", c, MQTTMsgTypeNames[packet_type], timeout_ms);
     ASSERT(timeout_ms != 0);
+    ASSERT(packet_type != 0);
     c->async_handler.fp = fp;
     c->async_handler.packet_type = packet_type;
     TimerCountdownMS(&c->async_handler.timer, timeout_ms);
@@ -1062,6 +1065,7 @@ static void ClientConnect(MQTTClient* c)
         c->isconnected = 1;
         c->isbroker = 1;
         c->ping_outstanding = 0;
+        c->keepAliveInterval = data.keepAliveInterval;
         return;
     }
 exit:
