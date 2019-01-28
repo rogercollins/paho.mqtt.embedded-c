@@ -420,11 +420,12 @@ static int cycle(MQTTClient* c, Timer* timer)
         case PUBCOMP:
             break;
         case PINGRESP:
-            DEBUG_PRINT("pingresp %d\n", clock_ticks);
+            printf("mqtt: pingresp at %d\n", clock_ticks);
             c->ping_outstanding = 0;
             break;
         case PINGREQ:
             {
+                printf("mqtt: pingreq at %d\n", clock_ticks);
                 int len = MQTTSerialize_pingresp(c->buf, c->buf_size);
                 if (len > 0) {
                     rc = sendPacket(c, len, timer);
@@ -529,6 +530,10 @@ void MQTTCycle(MQTTClient* c)
 {
     Timer timer;
     enum msgTypes rc;
+
+    if (c->busy) {
+        return;
+    }
 
     TimerCountdownMS(&timer, 500); /* Don't wait too long if no traffic is incoming */
     rc = cycle(c, &timer);
