@@ -420,12 +420,12 @@ static int cycle(MQTTClient* c, Timer* timer)
         case PUBCOMP:
             break;
         case PINGRESP:
-            printf("mqtt: pingresp at %d\n", clock_ticks);
+            DEBUG_PRINT("mqtt: pingresp at %d\n", clock_ticks);
             c->ping_outstanding = 0;
             break;
         case PINGREQ:
             {
-                printf("mqtt: pingreq at %d\n", clock_ticks);
+                DEBUG_PRINT("mqtt: pingreq at %d\n", clock_ticks);
                 int len = MQTTSerialize_pingresp(c->buf, c->buf_size);
                 if (len > 0) {
                     rc = sendPacket(c, len, timer);
@@ -1056,7 +1056,6 @@ static void ClientConnect(MQTTClient* c)
     int len = 0;
     Timer timer;
 
-    DEBUG_PRINT("ClientConnect\n");
     rc = MQTTDeserialize_connect(&data, c->readbuf, c->readbuf_size);
     if (rc != 1) {
         printf("mqtt: deserialize_connect error %d\n", rc);
@@ -1086,6 +1085,7 @@ static void ClientConnect(MQTTClient* c)
         c->ping_outstanding = 0;
         c->keepAliveInterval = data.keepAliveInterval;
         TimerCountdown(&c->last_received, c->keepAliveInterval + c->command_timeout_ms/1000 + 1);
+        printf("mqtt: client connected keep alive %d %p\n", c->keepAliveInterval, c->pcx);
         return;
     }
 exit:
