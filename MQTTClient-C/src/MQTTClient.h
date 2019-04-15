@@ -116,7 +116,6 @@ typedef struct MQTTClient
     unsigned char *buf,
       *readbuf;
     unsigned int keepAliveInterval;
-    char ping_outstanding;
     int isconnected;
     int cleansession;
 
@@ -160,6 +159,14 @@ typedef struct MQTTClient
 
     /** message handler index of last start op */
     int handler_index;
+
+    struct {
+        uint32_t started_tick;
+        uint32_t cnt;
+        uint32_t min;
+        uint32_t max;
+        uint32_t sum;
+    } stats;
 
     /* added for broker ops */
 

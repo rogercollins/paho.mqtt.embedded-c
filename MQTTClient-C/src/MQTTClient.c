@@ -28,6 +28,8 @@ static void ConnectEnd(MQTTClient *c);
 static void SubscribeEnd(MQTTClient* c);
 static void PublishEnd(MQTTClient* c);
 static void ClientConnect(MQTTClient* c);
+void async_waitfor(MQTTClient* c, int packet_type, void (*fp)(MQTTClient *), int timeout_ms);
+
 
 static void NewMessageData(MessageData* md, MQTTString* aTopicName, MQTTMessage* aMessage) {
     md->topicName = aTopicName;
@@ -44,8 +46,6 @@ static int sendPacket(MQTTClient* c, int length, Timer* timer)
 {
     int rc = FAILURE,
         sent = 0;
-
-    DEBUG_PRINT("sendPacket %s\n", MQTTMsgTypeNames[c->buf[0] >> 4]);
 
     ASSERT(c->busy == 0);
     c->busy = 1;
@@ -81,7 +81,6 @@ void MQTTClientInit(MQTTClient* c, Network* network, unsigned int command_timeou
     c->buf_size = sendbuf_size;
     c->isconnected = 0;
     c->cleansession = 0;
-    c->ping_outstanding = 0;
     c->defaultMessageHandler = NULL;
 	  c->next_packetid = 1;
     TimerInit(&c->last_sent);
@@ -273,21 +272,14 @@ int keepalive(MQTTClient* c)
 
     if (TimerIsExpired(&c->last_sent) || TimerIsExpired(&c->last_received))
     {
-        if (c->ping_outstanding) {
-            printf("mqtt: ping response timeout %d\n", clock_ticks);
-            rc = FAILURE; /* PINGRESP not received in keepalive interval */
+        Timer timer;
+        TimerInit(&timer);
+        TimerCountdownMS(&timer, 1000);
+        int len = MQTTSerialize_pingreq(c->buf, c->buf_size);
+        if (len > 0 && (rc = sendPacket(c, len, &timer)) == SUCCESS) {
+            async_waitfor(c, PINGRESP, NULL, c->command_timeout_ms);
         }
-        else
-        {
-            Timer timer;
-            TimerInit(&timer);
-            TimerCountdownMS(&timer, 1000);
-            int len = MQTTSerialize_pingreq(c->buf, c->buf_size);
-            if (len > 0 && (rc = sendPacket(c, len, &timer)) == SUCCESS) // send the ping packet
-                c->ping_outstanding = 1;
-            DEBUG_PRINT("mqtt: ping %d\n", clock_ticks);
-            TimerCountdown(&c->last_received, c->command_timeout_ms);
-        }
+        TimerCountdown(&c->last_received, c->command_timeout_ms);
     }
 
 exit:
@@ -307,7 +299,6 @@ void MQTTCleanSession(MQTTClient* c)
 void MQTTCloseSession(MQTTClient* c)
 {
     c->async_handler.packet_type = 0;
-    c->ping_outstanding = 0;
     c->isconnected = 0;
     c->busy = 0;
     if (c->cleansession)
@@ -320,11 +311,11 @@ static int cycle(MQTTClient* c, Timer* timer)
     int len = 0,
         rc = SUCCESS;
 
-    int packet_type = readPacket(c, timer);     /* read the socket, see what work is due */
+    enum msgTypes packet_type = readPacket(c, timer);     /* read the socket, see what work is due */
 
-    if (packet_type > 0) {
-        DEBUG_PRINT("mqtt: cycle: recv: %p: %s, len %d of %d\n",
-                c, MQTTMsgTypeNames[packet_type], c->read_len, c->readbuf_size);
+    if (packet_type > 0 && packet_type != c->async_handler.packet_type) {
+        DEBUG_PRINT("%d: mqtt: cycle: recv: %p: %s, len %d of %d\n",
+                clock_ticks, c, MQTTMsgTypeNames[packet_type], c->read_len, c->readbuf_size);
     }
 
     switch (packet_type)
@@ -334,7 +325,7 @@ static int cycle(MQTTClient* c, Timer* timer)
             /* no more data to read, unrecoverable. Or read packet fails due to unexpected network error */
             rc = packet_type;
             goto exit;
-        case 0: /* timed out reading packet */
+        case NONE: /* timed out reading packet */
             break;
         case CONNECT:
             break;
@@ -420,12 +411,10 @@ static int cycle(MQTTClient* c, Timer* timer)
         case PUBCOMP:
             break;
         case PINGRESP:
-            DEBUG_PRINT("mqtt: pingresp at %d\n", clock_ticks);
-            c->ping_outstanding = 0;
+            /* do nothing */
             break;
         case PINGREQ:
             {
-                DEBUG_PRINT("mqtt: pingreq at %d\n", clock_ticks);
                 int len = MQTTSerialize_pingresp(c->buf, c->buf_size);
                 if (len > 0) {
                     rc = sendPacket(c, len, timer);
@@ -437,7 +426,7 @@ static int cycle(MQTTClient* c, Timer* timer)
             return 0;
     }
 
-    if (keepalive(c) != SUCCESS) {
+    if (c->async_handler.packet_type == 0 && keepalive(c) != SUCCESS) {
         //check only keepalive FAILURE status so that previous FAILURE status can be considered as FAULT
         rc = FAILURE;
     }
@@ -541,7 +530,19 @@ void MQTTCycle(MQTTClient* c)
     {
         if (rc == c->async_handler.packet_type)
         {
-            DEBUG_PRINT("mqtt: got: %p: %s\n", c, MQTTMsgTypeNames[rc]);
+            uint32_t dur;
+
+            dur = clock_ticks - c->stats.started_tick;
+            c->stats.sum += dur;
+            c->stats.cnt += 1;
+            if (dur < c->stats.min) {
+                c->stats.min = dur;
+            }
+            if (dur > c->stats.max) {
+                c->stats.max = dur;
+            }
+
+            DEBUG_PRINT("%d: mqtt: got %p: %s\n", clock_ticks, c, MQTTMsgTypeNames[rc]);
             if (c->async_handler.fp)
             {
                 (*c->async_handler.fp)(c);
@@ -550,8 +551,8 @@ void MQTTCycle(MQTTClient* c)
         }
         else if (TimerIsExpired(&c->async_handler.timer))
         {
-            printf("mqtt: MQTTCycle: %p: timeout waiting for %s\n",
-                    c, MQTTMsgTypeNames[c->async_handler.packet_type]);
+            printf("%d: mqtt: MQTTCycle: %p: timeout waiting for %s\n",
+                   clock_ticks, c, MQTTMsgTypeNames[c->async_handler.packet_type]);
             MQTTCloseSession(c);
         }
     }
@@ -563,7 +564,14 @@ void MQTTCycle(MQTTClient* c)
 
 void async_waitfor(MQTTClient* c, int packet_type, void (*fp)(MQTTClient *), int timeout_ms)
 {
-    DEBUG_PRINT("mqtt: async_waitfor: %p: %s, %d ms\n", c, MQTTMsgTypeNames[packet_type], timeout_ms);
+    if (packet_type == CONNACK) {
+        timeout_ms *= 2;
+    }
+    DEBUG_PRINT("%d: mqtt: waitfor: %s, %d ms\n",
+                clock_ticks, MQTTMsgTypeNames[packet_type], timeout_ms);
+
+    c->stats.started_tick = clock_ticks;
+
     ASSERT(timeout_ms != 0);
     ASSERT(packet_type != 0);
     c->async_handler.fp = fp;
@@ -616,7 +624,6 @@ exit:
     if (rc == SUCCESS)
     {
         c->isconnected = 1;
-        c->ping_outstanding = 0;
     }
 
 #if defined(MQTT_TASK)
@@ -681,8 +688,7 @@ void ConnectEnd(MQTTClient *c)
         if (data.rc == SUCCESS)
         {
             c->isconnected = 1;
-            c->ping_outstanding = 0;
-            printf("mqtt: connected OK\n");
+            DEBUG_PRINT("mqtt: connected OK\n");
             return;
         }
         else if ((data.rc == 5 || data.rc == 4) && c->authentication_failed)
@@ -917,6 +923,7 @@ int MQTTPublish(MQTTClient* c, const char* topicName, MQTTMessage* message)
     TimerInit(&timer);
     TimerCountdownMS(&timer, c->command_timeout_ms);
 
+    message->id = 0;
     if (message->qos == QOS1 || message->qos == QOS2)
         message->id = getNextPacketId(c);
 
@@ -986,8 +993,9 @@ int MQTTPublishStart(MQTTClient* c, const char* topicName, MQTTMessage* message)
               topic, (unsigned char*)message->payload, message->payloadlen);
     if (len <= 0)
         goto exit;
-    DEBUG_PRINT("PUBLISH id %d, %s, %d, qos %d\n",
-            message->id, topic.cstring, message->payloadlen, message->qos);
+
+    DEBUG_PRINT("%d: mqtt: PUBLISH id %d, %s, %d, qos %d\n",
+                clock_ticks, message->id, topic.cstring, message->payloadlen, message->qos);
     if ((rc = sendPacket(c, len, &timer)) != SUCCESS) // send the subscribe packet
         goto exit; // there was a problem
     if (message->qos) {
@@ -1082,7 +1090,6 @@ static void ClientConnect(MQTTClient* c)
     if (rc == 0) {
         c->isconnected = 1;
         c->isbroker = 1;
-        c->ping_outstanding = 0;
         c->keepAliveInterval = data.keepAliveInterval;
         TimerCountdown(&c->last_received, c->keepAliveInterval + c->command_timeout_ms/1000 + 1);
         printf("mqtt: client connected keep alive %d %p\n", c->keepAliveInterval, c->pcx);
