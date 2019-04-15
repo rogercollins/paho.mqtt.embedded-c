@@ -88,6 +88,9 @@ void MQTTClientInit(MQTTClient* c, Network* network, unsigned int command_timeou
 
     c->busy = 0;
 
+    c->stats.cnt = c->stats.max = c->stats.sum = 0;
+    c->stats.min = 1000000;
+
 #if defined(MQTT_TASK)
 	  MutexInit(&c->mutex);
 #endif
